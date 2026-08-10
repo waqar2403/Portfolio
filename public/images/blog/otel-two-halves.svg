@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 360" width="880" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">The two halves of the repository, and why they are judged differently</title>
+  <desc id="desc">Code under tool slash runs on a developer's machine while they build, then exits. Nothing it depends on reaches the finished binary, so it can be as heavy as it likes and clarity is what matters. Code under pkg slash and instrumentation slash is compiled into somebody else's application and runs in their production system. Every dependency it adds becomes theirs, every millisecond is spent on their request path, and every panic it fails to contain is their outage. Restraint is what matters there.</desc>
+  <style>
+    svg{--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--border:#e7e5e4;--surface:#f5f5f4}
+    @media (prefers-color-scheme: dark){
+      svg{--bg:#0c0a09;--fg:#e7e5e4;--muted:#a8a29e;--border:#292524;--surface:#1c1917}
+    }
+    .bg{fill:var(--bg)}
+    .sans{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:700}
+    .box{fill:var(--surface);stroke:var(--border);stroke-width:1.5}
+    .boxHot{fill:var(--fg);stroke:var(--fg);stroke-width:1.5}
+    .lbl{fill:var(--muted);font-size:10px;letter-spacing:.11em;font-weight:700}
+    .s{fill:var(--muted);font-size:12px}
+    .sOn{fill:var(--bg);font-size:12px;opacity:.85}
+    .verdict{fill:var(--fg);font-weight:600;font-size:13px}
+    .kick{fill:var(--fg);font-weight:700;font-size:14px}
+    .kickOn{fill:var(--bg);font-weight:700;font-size:14px}
+    .div{stroke:var(--border);stroke-width:1.5;stroke-dasharray:6 5}
+  </style>
+
+  <rect class="bg" x="0" y="0" width="880" height="360" rx="16"/>
+
+  <text class="sans verdict" x="28" y="36">Ask one question before you open any file: does this stay in the workshop, or does it drive away?</text>
+
+  <line class="div" x1="440" y1="60" x2="440" y2="326"/>
+
+  <text class="sans lbl" x="36" y="80">THE WORKSHOP</text>
+  <rect class="box" x="28" y="92" width="384" height="184" rx="14"/>
+
+  <text class="mono" x="52" y="122" fill="var(--fg)">tool/</text>
+  <text class="sans s" x="52" y="148">Runs on a developer's laptop while they build.</text>
+  <text class="sans s" x="52" y="168">Reads source, rewrites it, exits.</text>
+  <text class="sans s" x="52" y="200">Nothing it imports reaches the finished binary.</text>
+  <text class="sans s" x="52" y="220">It can be as heavy as it likes.</text>
+  <text class="sans s" x="52" y="240">One machine, one build, then gone.</text>
+  <text class="sans kick" x="52" y="266">Clarity wins.</text>
+
+  <text class="sans lbl" x="476" y="80">IT DRIVES AWAY</text>
+  <rect class="boxHot" x="468" y="92" width="384" height="184" rx="14"/>
+
+  <text class="mono" x="492" y="122" fill="var(--bg)">pkg/  instrumentation/</text>
+  <text class="sans sOn" x="492" y="148">Compiled into somebody else's application.</text>
+  <text class="sans sOn" x="492" y="168">Runs in their production system.</text>
+  <text class="sans sOn" x="492" y="200">Every dependency you add becomes theirs.</text>
+  <text class="sans sOn" x="492" y="220">Every millisecond is on their request path.</text>
+  <text class="sans sOn" x="492" y="240">Every panic you miss is their outage.</text>
+  <text class="sans kickOn" x="492" y="266">Restraint wins.</text>
+
+  <text class="sans s" x="28" y="308">This is why the project has more than one go.mod, and why the same review comment can be right on one</text>
+  <text class="sans s" x="28" y="328">side of the line and wrong on the other.</text>
+</svg>

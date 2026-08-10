@@ -1,0 +1,181 @@
+---
+title: What the heck is observability?
+date: "2026-07-10"
+summary: "I picked an open source project before I understood the subject. This is the introduction to observability I wanted six months ago: what it actually means, what traces really are, and why instrumentation is the expensive part."
+category: opentelemetry
+image: /images/blog/otel-1-observability.svg
+---
+
+*Part 1 of a three-part series on zero-code instrumentation for Go. Next: [Inside OpenTelemetry Go](/blog/inside-opentelemetry-go).*
+
+A customer says checkout is slow. Not broken, not failing, just slow, and only sometimes.
+
+So you look. You open the logs and find thousands of lines saying everything went fine. You search for errors and there are none, because nothing errored. Every request completed. They were simply slow.
+
+Now what?
+
+That question is what this whole field exists to answer. Something is wrong, nobody predicted this particular kind of wrong, and you have to work out why using only what the program already told you. If your answer is "add some logging and wait for it to happen again," you have just admitted your program cannot explain itself.
+
+## Why the old way stopped working
+
+If your software is one program on one machine, you can usually reason your way out. Add a line that writes "reached step four", run it again, read the output. Slow, but it works, because there is only one place for the time to go.
+
+Two things broke that.
+
+The first is that we split programs into many programs. One checkout request now passes through a frontend, a cart service, a pricing service, an inventory service, a payments service, and a few databases behind those. Each keeps its own logs. Each set of logs looks fine. The request itself, the thing the customer actually experienced, exists nowhere as a single story.
+
+The second is volume. When a problem affects one request in two hundred, "add a line and wait" stops being a method. You drown in output long before you find the one.
+
+Imagine running a delivery company with six depots. A parcel arrives late. Every depot's logbook says the same thing: parcel arrived, parcel left, all normal. Nobody wrote down when. Nobody wrote down which parcel. Six honest logbooks, and you still cannot say where the day went.
+
+## Monitoring is not the same word
+
+These two get used interchangeably, especially in job adverts, and the difference is the clearest way to understand what changed.
+
+Monitoring is for things you thought of in advance. Processor above eighty percent. Error rate above one percent. Disk nearly full. You decided beforehand that these mattered, you set a threshold, and something tells you when it is crossed. This is useful and it is not going away.
+
+Observability is for the things you did not think of. Nobody sets an alert for "checkout is slow, but only for customers with more than twelve items in the basket, and only while the recommendations service is busy." You cannot define that in advance. You can only hope the program recorded enough for you to find it afterwards.
+
+So the working definition is this:
+
+> Can you explain what is happening inside your system without shipping new code to find out?
+
+If every investigation ends with a deploy, the system is not observable. It is merely logged.
+
+Monitoring is the smoke alarm. It knows one thing and knows it well, and you are glad it exists. Observability is being able to walk the building afterwards and work out where the fire started, from what is already there.
+
+## Three kinds of data
+
+You will hear about the three pillars of observability. It is a popular phrase and it is slightly wrong, because it makes them sound like separate structures holding up a roof. They are better understood as three views of the same events, at different levels of detail and different costs. [1]
+
+**Metrics** are numbers measured over time. Requests per second, error percentage, memory in use. They are cheap because they are aggregated: a million requests become one number. That cheapness is also the limit. A metric tells you the error rate doubled. It cannot tell you which request, or why.
+
+**Logs** are lines of text a program writes as it works. "Connecting to replica 3." "Retrying after timeout." They carry the most detail, which makes them the most expensive to keep at volume, and each describes one moment in one program rather than a journey across many.
+
+**Traces** are the newest of the three and the one this series builds towards. A trace follows a single request through every service it touched and records how long each step took. It is the only one that reassembles the customer's actual experience out of six separate systems.
+
+| | Answers | Cost | Weakness |
+|---|---|---|---|
+| Metrics | Did something change, and when? | Very cheap | Cannot explain a single case |
+| Logs | What did this code say, at this moment? | Expensive at volume | One program, no journey |
+| Traces | Where did the time go, across everything? | Moderate, usually sampled | Needs every service to cooperate |
+
+The point is not to collect all three. The point is to move between them.
+
+Return to the slow checkout, in a system that can explain itself. You notice on a chart that the slowest five percent of checkouts have doubled since Tuesday. That is a metric. It tells you something changed, and roughly when.
+
+You open one slow request from that window and see where its time went. That is a trace.
+
+You look at what the slow service was saying at that moment and find repeated lines about retrying a connection to a database replica. Those are logs. They tell you what the code had to say about it.
+
+Three questions, three kinds of data, one investigation. Nobody predicted this failure and nobody deployed anything to understand it.
+
+## What a trace actually looks like
+
+This is the mechanism worth understanding properly, because everything else in this series depends on it.
+
+A **span** is a single recorded step. It has a name, a start time, an end time, and some labelled details. "Handled the HTTP request" is a span. "Ran this database query" is a span.
+
+A **trace** is all the spans belonging to one request, arranged as a tree. One span is the root and the rest record which span they happened inside.
+
+Drawn on a timeline, a trace looks like this:
+
+![One request, one trace, four spans](/images/blog/otel-trace-anatomy.svg)
+
+That picture is the entire value proposition. Nobody had to guess which service was slow. The shape says it. The frontend span covers the whole request, three child spans sit inside it, and one of them is visibly eating the request.
+
+Notice what you did not need. You did not need to know in advance that inventory would be the problem. You did not need an alert on it. You looked at one request and the answer was geometric.
+
+## How the pieces find each other
+
+For that tree to exist, every span has to agree on which request it belongs to. So each carries a **trace ID**, a random number shared by everything in that request, plus its own **span ID** and a note of its parent.
+
+Inside a single program, passing that identity around is a matter of handing it down through the code. The interesting problem is the edge, when your service calls another over the network. That other program is a separate process, possibly on another machine. It knows nothing.
+
+So the identity gets written into the request itself, as an ordinary HTTP header, and read out on the other side.
+
+![How the trace identity crosses a network boundary](/images/blog/otel-context-propagation.svg)
+
+The header is called `traceparent` and it is a web standard. It looks like this:
+
+```
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+             ▲  ▲                                ▲                ▲
+             │  │                                │                └ sampled? 01 means yes
+             │  │                                └ the calling span's ID
+             │  └ the trace ID, shared by everything in this request
+             └ format version
+```
+
+The receiving service reads it, starts its spans as children of the one named in it, and passes it along on its own outgoing calls. That is the whole trick, and it is called **context propagation**.
+
+A hospital gives you a wristband when you arrive. Every department writes its notes against that number, and when they send you upstairs the number goes with you. At the end of the day one clerk can gather every note and reconstruct your whole visit in order. Lose the wristband once and everything after it becomes an anonymous stack of paper.
+
+Almost everything in the rest of this series exists to make sure that wristband is created, carried, and never dropped.
+
+## Why you would bother
+
+Three reasons, in the order people usually discover them.
+
+**You stop guessing.** The most expensive minutes of an incident are the ones spent arguing about which team owns the problem. A trace ends that argument in about four seconds, because the answer is a picture.
+
+**You find the things nobody reported.** Most systems have a handful of steady, unremarkable problems that nobody has filed a ticket about: a retry that always fires, a call that was supposed to be cached and isn't, a dependency that adds ninety milliseconds to every request. These are invisible in aggregate and obvious in a trace.
+
+**You can answer new questions.** This is the one that matters long term. A system you can query is a system where a question that occurs to somebody on a Tuesday can be answered on that Tuesday, rather than becoming a two-week instrumentation project.
+
+## How it fits together
+
+People say "we use OpenTelemetry" as though it were something you look at. It is not. It is the part that makes the data and moves it. Looking at it is somebody else's job.
+
+Four things happen, in order:
+
+1. **Instrument.** Code inside your program creates spans, metrics and logs.
+2. **Collect.** Something gathers that data, batches it, filters it, forwards it.
+3. **Store.** Something writes it somewhere that can hold a lot of it, cheaply.
+4. **Query.** Humans ask questions and look at charts.
+
+OpenTelemetry covers the first two and deliberately stops. That boundary is the reason it exists at all.
+
+Before it, every vendor had its own way to instrument code. Choosing a vendor meant writing thousands of lines against that vendor's tooling, and changing your mind later meant writing them all again. OpenTelemetry is the industry agreeing on one way to produce telemetry, which makes the storage and the dashboards swappable.
+
+It is the plug and socket standard. It does not decide what appliance you buy or which electricity company you use. It only means the plug fits, and changing supplier does not mean rewiring the house.
+
+## The part nobody warns you about
+
+Here is what takes longest to understand, and it is why the rest of this series exists.
+
+None of that data appears on its own.
+
+Your program does not know it is part of a larger system. It does not know that the request it just received is the same customer action that began three services ago. Something has to create that identity when the request arrives, carry it through the code, write it onto outgoing calls, and read it back on the other side.
+
+Somebody has to write that. In every service. On every path.
+
+That work is called **instrumentation**, and it is by far the most expensive part of observability. Not the licences, not the storage. The instrumentation, because it is spread thin across everything you own and it never quite finishes.
+
+And there is a harder version of the problem. Modern programs are mostly assembled out of parts other people wrote: the web framework, the database driver, the message queue client. That borrowed code is exactly where the interesting delays happen, and you cannot edit it. You would have to fork somebody's project and maintain your own copy forever.
+
+You can renovate your own flat freely. But the building's shared plumbing runs through your walls and belongs to the building, not to you. When the pressure drops, that plumbing is precisely where you need a gauge, and precisely where you are not allowed to fit one.
+
+Which leaves the question the next part answers. How much of this can you avoid writing by hand, and how do you reach the code you do not own?
+
+For Java and Python, the answer is "attach something at startup and it will edit your libraries as they load." For Go, that answer does not work at all, and what the Go community built instead is genuinely unusual.
+
+## Why I wrote this
+
+I came to all of this backwards.
+
+I was looking through projects for the LFX mentorship programme, working out where I might be able to contribute, and I found a repository called `opentelemetry-go-compile-instrumentation`. I did not really know what it did. I had the sort of observability knowledge most working developers have: I had seen dashboards, I knew logs existed, I could have defined "tracing" in a sentence if somebody made me. Nothing deeper than that.
+
+So I picked the project first and understood the subject afterwards, which is the wrong order and turned out to be the best thing that could have happened. Every idea in this article is one I had to go and learn properly because a piece of code in front of me did not make sense without it. I did not learn what a span was from a diagram. I learned it because I could not understand why one function was reaching for something called a context, and following that thread took a week.
+
+That is the reason this series exists, and the reason it starts here rather than with the tool. When you learn a subject in order to fix something, you end up knowing exactly which parts were confusing, because you were confused by them recently. Most introductions are written by people who have known the material so long they have forgotten what it felt like not to.
+
+I have not forgotten. This is the introduction I wanted six months ago.
+
+---
+
+**Next:** [Part 2, Inside OpenTelemetry Go](/blog/inside-opentelemetry-go). Why a Go binary cannot be instrumented the way a Java one can, and what happens instead.
+
+---
+
+[1] The framing is being quietly retired. Continuous profiling is now widely treated as a fourth signal, which makes "three pillars" awkward, and practitioners increasingly describe them as intertwined views rather than independent supports. The useful question was never how many there are. It is which one answers the question in front of you.

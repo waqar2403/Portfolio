@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 300" width="880" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">How the trace identity crosses a network boundary</title>
+  <desc id="desc">Inside a program the trace identity is handed down through the code. When one service calls another, the identity is written into an HTTP header called traceparent. The receiving service reads that header and starts its own spans as children of the span named in it. The trace ID stays the same on both sides; the span ID changes. Drop the header and the journey breaks into two unrelated traces.</desc>
+  <style>
+    svg{--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--border:#e7e5e4;--surface:#f5f5f4}
+    @media (prefers-color-scheme: dark){
+      svg{--bg:#0c0a09;--fg:#e7e5e4;--muted:#a8a29e;--border:#292524;--surface:#1c1917}
+    }
+    .bg{fill:var(--bg)}
+    .sans{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+    .box{fill:var(--surface);stroke:var(--border);stroke-width:1.5}
+    .wire{fill:var(--fg);stroke:var(--fg);stroke-width:1.5}
+    .hi{fill:var(--fg);font-weight:600;font-size:14px}
+    .h{fill:var(--fg);font-weight:700;font-size:14px}
+    .s{fill:var(--muted);font-size:12px}
+    .onDark{fill:var(--bg)}
+    .onDarkMute{fill:var(--muted);opacity:.9}
+    .lbl{fill:var(--muted);font-size:11px}
+    .ln{stroke:var(--muted);stroke-width:1.5;fill:none}
+    .arw{fill:var(--muted)}
+    .rule{stroke:var(--border);stroke-width:1}
+  </style>
+
+  <rect class="bg" x="0" y="0" width="880" height="300" rx="16"/>
+
+  <text class="sans hi" x="28" y="34">Inside a program: hand it down. Between programs: write it on the request.</text>
+
+  <rect class="box" x="28" y="60" width="250" height="110" rx="12"/>
+  <text class="sans h" x="153" y="88" text-anchor="middle">Service A</text>
+  <text class="sans s" x="153" y="112" text-anchor="middle">creates the root span</text>
+  <text class="sans s" x="153" y="132" text-anchor="middle">passes identity down</text>
+  <text class="sans s" x="153" y="152" text-anchor="middle">through the code</text>
+
+  <rect class="wire" x="318" y="72" width="244" height="86" rx="10"/>
+  <text class="sans onDark" x="440" y="97" text-anchor="middle" font-weight="700" font-size="12">the HTTP request</text>
+  <text class="mono onDark" x="440" y="122" text-anchor="middle">traceparent:</text>
+  <text class="mono onDark" x="440" y="140" text-anchor="middle">00-4bf92f35...-00f067aa...-01</text>
+
+  <rect class="box" x="602" y="60" width="250" height="110" rx="12"/>
+  <text class="sans h" x="727" y="88" text-anchor="middle">Service B</text>
+  <text class="sans s" x="727" y="112" text-anchor="middle">reads the header</text>
+  <text class="sans s" x="727" y="132" text-anchor="middle">starts its spans as</text>
+  <text class="sans s" x="727" y="152" text-anchor="middle">children of that one</text>
+
+  <path class="ln" d="M278 115 H310"/>
+  <path class="arw" d="M310 110 l9 5 l-9 5 z"/>
+  <path class="ln" d="M562 115 H594"/>
+  <path class="arw" d="M594 110 l9 5 l-9 5 z"/>
+
+  <line class="rule" x1="28" y1="200" x2="852" y2="200"/>
+  <text class="sans s" x="28" y="224"><tspan fill="var(--fg)" font-weight="700">trace ID</tspan> is identical on both sides. That is what makes them one trace.</text>
+  <text class="sans lbl" x="28" y="246">span ID differs. Each service records its own steps.</text>
+  <text class="sans lbl" x="28" y="268">The sampled flag travels too, so every service agrees whether to keep this one.</text>
+  <text class="sans s" x="28" y="290" fill="var(--fg)">Drop the header once and everything downstream becomes an unrelated trace.</text>
+</svg>

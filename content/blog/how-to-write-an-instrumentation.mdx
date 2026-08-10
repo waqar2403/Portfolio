@@ -1,0 +1,144 @@
+---
+title: How to write an instrumentation
+date: "2026-07-18"
+summary: "The reference guide starts at step one, define rules. Everything genuinely difficult happens before that line: finding the seam, enumerating the entry points, and knowing whether you are allowed to create a span at all."
+category: opentelemetry
+image: /images/blog/otel-3-instrumentation.svg
+---
+
+*Part 3 of a three-part series on zero-code instrumentation for Go. Start at [What the heck is observability?](/blog/otel-observability-ground-floor), then [Inside OpenTelemetry Go](/blog/inside-opentelemetry-go).*
+
+There is already a guide in this repository called `docs/instrument-guide.md`. It is good, and you should read it. It has five sections: define rules, implement hooks, testing, register the instrumentation, verify.
+
+Notice where it begins. Step one is *define rules*, which assumes you already know which function you are going to attach to and what you intend to do when you get there.
+
+Everything genuinely difficult happens before that line. This is about those decisions.
+
+## Start by looking for a door that already exists
+
+The instinct, when you first try this, is to find the function that does the interesting work and wrap it. For a Redis client that means finding wherever commands get sent, attaching there, and timing it.
+
+Look at how the Redis instrumentation in this repository actually works. Here is the entire hook for the ordinary client:
+
+```go
+func afterNewRedisClientV9(ictx hook.HookContext, client *redis.Client) {
+	client.AddHook(newOtelRedisHook(client.Options().Addr))
+}
+```
+
+One line of real work. It does not touch a single command. It attaches to `NewClient`, the constructor, and then calls `AddHook`, which is a mechanism `go-redis` already provides for exactly this purpose.
+
+This is the most useful habit to learn, and it generalises to almost every library worth instrumenting. **Instrument the construction, not the work.** Many libraries already have an extension point: a hook registry, a middleware chain, a functional option, an interceptor slice, a callback you can register. If one exists, your job stops being "intercept everything this library does" and becomes "be present when the object is created, and install the library's own extension."
+
+The difference matters more than it looks. Wrapping the work means you now depend on the internal shape of a function that the library authors are free to change in any release. Using the library's own extension point means you depend on its public API, which is the thing they have promised not to break.
+
+So before writing anything, go and read the library's documentation looking for the words hook, middleware, interceptor, option, callback, or listener. If you find one, that is your answer. If you find none, then you are in the harder case, and you have to attach to an internal function and accept the maintenance that comes with it.
+
+## Then find all the doors
+
+Here is the part people get wrong on their first attempt. They find `NewClient`, hook it, test it with a simple example, and it works.
+
+The Redis rule file has six rules, not one:
+
+```yaml
+redis_hook_newclient:
+  target: github.com/redis/go-redis/v9
+  where:
+    func: NewClient
+  do:
+    - inject_hooks:
+        after: afterNewRedisClientV9
+        path: "go.opentelemetry.io/otelc/instrumentation/github.com/redis/go-redis/v9"
+```
+
+and then five more like it, for `NewFailoverClient`, `NewSentinelClient`, `NewRing`, `NewClusterClient`, and the `Conn` method on `*Client`.
+
+Every one of those is a way a user can end up holding a Redis client. If you hook only the first, then everybody running Redis Sentinel gets no telemetry at all, and they get no error either. Their traces are simply missing a service, and they will not find out until an incident.
+
+Two of them need a different shape, which is the kind of thing you only learn by reading. A Redis ring is a set of nodes, and nodes appear over time. Attaching once at construction would miss every node created afterwards, so instead of calling `AddHook` directly, the ring hook registers an `OnNewNode` callback that attaches to each node as it appears.
+
+So the second question, after finding a seam, is: how many ways can a user reach this? Constructors, factory functions, methods that hand back a new object, pooled variants, cluster variants. Enumerate them before you write the rule file, or you will ship an instrumentation that works in the demo and fails in half of production.
+
+## Decide whether you are allowed to create a span
+
+Now the decision that took me longest to understand, and the one that is not written down anywhere in the guide.
+
+I got this wrong in my head first. When I started on the Gin instrumentation, my mental model was that instrumenting a web framework meant creating a span for the request, because that is what instrumenting a web framework obviously means. It took a review comment and a fair amount of reading before I understood why that would have been a bug.
+
+Sometimes a span already exists, and creating a second one is a bug.
+
+Compare the Redis rule above with the one for the Gin web framework. It attaches to `Next` on `*gin.Context`, and its hook does not create a span at all. It finds the span that already exists and improves it.
+
+The reason is that a Gin application is a `net/http` server underneath, and the `net/http` server instrumentation has already created a span by the time any Gin code runs. If Gin created its own, every request would produce two spans describing the same work. Traces double in size, the service map grows edges that do not exist, and every latency figure becomes ambiguous.
+
+So the rule is: **the layer that owns the transport creates the span. The layer above it adds meaning.**
+
+That raises a fair question. If the HTTP layer already made the span, what is left for Gin to do? The answer is the single most valuable attribute on the whole span. When a request arrives, the HTTP layer knows the path is `/users/12345`. It does not know, and cannot know, that this matched the route `/users/:id`, because routing has not happened yet. Gin knows, but only after its router has run.
+
+That is why the Gin hook attaches to `Next` rather than to the entry point. By the time `Next` is called, the route is known. So the hook renames the span from the bare method to `GET /users/:id` and records the route as an attribute.
+
+This is not a Go peculiarity, incidentally. The JavaScript Express instrumentation states in its README that it requires the HTTP instrumentation to be enabled too, or you see no spans at all. The Python Flask instrumentation declares a package dependency on the WSGI instrumentation beneath it. Three ecosystems, independently, same layering.
+
+So before you write a hook, ask what is underneath you. If something already created a span for this unit of work, your job is to improve it.
+
+## Do not invent attribute names
+
+New authors reliably make up attribute names. It feels like a free choice. It is not.
+
+There is a specification called semantic conventions, and it is shared across every OpenTelemetry language. It says what a span should be called, which attributes it carries, and exactly how each is spelled. Not `db.statement` when the spec says otherwise, not `redisAddr`, not whatever reads nicely to you.
+
+The reason is aggregation. A backend can compute error rate per operation across services written in five languages only because all of them spell the attribute identically. Invent a name and your telemetry stops being comparable with everyone else's, which removes most of the point of emitting it.
+
+Notice that the Redis instrumentation has a `semconv` package of its own rather than string literals scattered through the hook. Inside it, attributes are named constants from the shared conventions package, `semconv.DBSystemNameRedis` and `semconv.ServerAddress` rather than the strings they happen to spell today. That is the pattern to copy. Attribute names belong in one place, so that when the conventions shift, and they do shift, there is one file to change rather than forty call sites, and a rename upstream becomes a compile error rather than silently wrong data.
+
+The other rule, which is easy to violate accidentally, is cardinality. A span named `GET /users/:id` produces one row when a backend aggregates. A span named `GET /users/12345` produces one row per user who has ever existed. The second is not merely wasteful. It makes the data useless for the question people ask most, which is whether this endpoint is slow.
+
+## Write down which versions you support, and mean it
+
+A rule may declare a version constraint:
+
+```yaml
+target: k8s.io/client-go
+version: "v0.34.0,v0.36.0"
+```
+
+The format is `start_inclusive,end_exclusive`, so that line matches versions greater than or equal to `v0.34.0` and strictly less than `v0.36.0`. Omit the field entirely and the rule matches every version.
+
+That line is a promise. It says this instrumentation was written against those versions and is expected to work on them.
+
+Nothing about writing it makes it true. If the library renames the function in a later release, the rule silently stops matching. The library still works. The application still builds and runs. The telemetry quietly disappears, and nobody notices until an incident, when the traces everyone reaches for end at exactly the service they needed to see inside.
+
+The Java agent solves this differently, with a mechanism called muzzle: it collects the symbols an instrumentation references at build time and checks them against the real classpath at runtime, refusing to apply if they disagree. Go has no classpath and no runtime symbol table to interrogate, so that approach does not transfer.
+
+What transfers is the intent. If your ecosystem gives you a declaration rather than a verification, then test the boundaries. Build against the lowest version you claim and the highest, and let CI tell you when the promise stops being true. There is a suite in this repository, `test/versionmatrix`, that exists for precisely this.
+
+## Prove it emits what you think
+
+You cannot unit test a span into existence. Instrumentation only exists after a real build with the tool in the loop, so the tests that matter run a real instrumented application and inspect what comes out.
+
+There are three layers, and each answers a different question. Unit tests check your hook's logic in isolation, which is fine for things like attribute construction. Integration tests under `test/integration` build an application with the instrumentation applied, run it, and assert on the spans that actually arrive. End to end tests under `test/e2e` prove the whole pipeline.
+
+One practical trap, because it will catch you. Spans are batched before export by default, so a test that makes a request and asserts immediately will see nothing, and you will conclude your hook never ran. Use `testutil.WaitForSpans` from `test/testutil/readiness.go`, which waits until at least the number of spans you expect has actually arrived. When an instrumentation appears not to work, check that before you go digging through generated code.
+
+Assert on semantic conventions rather than on strings you typed yourself. `test/testutil/semconv.go` already provides one assertion per instrumentation family, `RequireRedisClientSemconv`, `RequireHTTPServerSemconv`, `RequireDBClientSemconv` and the rest. Use them, and add one when you add a family. A test that compares against a string literal you typed will keep passing after the conventions rename the attribute, which means it has quietly stopped testing anything.
+
+## Before you send it
+
+Comment on the issue before you start writing. The queue in this project is long, and two people building the same fix is the most avoidable way to waste an afternoon.
+
+Keep it small. A rule, a hook, and its tests is a reviewable change. A rule, a hook, tests, a refactor of the shared helpers and a documentation restructure is not, and it will sit unreviewed for a fortnight.
+
+And understand what you are submitting. This project has an explicit policy on that, and its rule is short: you must be able to explain every line of your change without a tool in front of you. Maintainer attention is the scarcest resource any open source project has. A change nobody can defend in review costs more than it contributes.
+
+## The short version
+
+The guide will tell you the steps. These are the decisions the guide assumes you have already made:
+
+- Look for an extension point the library already provides. Instrument construction, not work.
+- Enumerate every way a user can reach the object. Constructors, factories, cluster and failover variants, methods that return new instances.
+- Ask what is underneath you. If a span already exists, improve it rather than adding a second.
+- Do not invent attribute names, and keep them in one file.
+- A version constraint is a promise. Test its boundaries.
+- Assert on conventions, not on strings.
+
+The mechanics of writing a rule and a hook take an afternoon. Those six decisions are the actual job.

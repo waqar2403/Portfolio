@@ -1,0 +1,184 @@
+---
+title: Inside OpenTelemetry Go
+date: "2026-07-15"
+summary: "Go compiled away the very flexibility that Java instrumentation depends on. So the intervention moved into the build itself. How -toolexec works, why the design was forced rather than chosen, and where to start reading the codebase."
+category: opentelemetry
+image: /images/blog/otel-2-internals.svg
+---
+
+*Part 2 of a three-part series on zero-code instrumentation for Go. Start at [What the heck is observability?](/blog/otel-observability-ground-floor). Next: [How to write an instrumentation](/blog/how-to-write-an-instrumentation).*
+
+Part 1 ended on a question. Instrumentation is the expensive part of observability, and the code you most need to watch is code you did not write and cannot edit. How much of it can you avoid writing by hand?
+
+For Java the answer is famous. You add one flag:
+
+```
+java -javaagent:opentelemetry-javaagent.jar -jar myapp.jar
+```
+
+The agent hooks into the virtual machine before your classes load, and rewrites bytecode on the way in. When your code eventually calls the HTTP server library, the version that loads is not quite the version on disk. It has been edited in memory to emit spans.
+
+Python does something different with the same effect. It imports your libraries, then reaches into the module objects and replaces functions with wrapped versions.
+
+Both work for the same underlying reason: those runtimes stay editable after the program starts. There is a loading step you can get in front of, and there are objects you can reach into while the program runs.
+
+Go has neither.
+
+## There is nothing to attach to
+
+A Go program compiles to a single static binary. By the time it runs, the linker has resolved every call, the compiler has decided what to inline, and functions are machine code at fixed addresses rather than entries in a table you can swap.
+
+No class loader. No import hook. No module object holding a replaceable reference to a function.
+
+This is not an oversight. It is the trade that makes Go binaries start instantly and deploy as one file. The flexibility that Java instrumentation depends on was compiled away deliberately.
+
+So the question changes shape. If you cannot edit the program while it runs, when can you edit it?
+
+There is exactly one honest answer left: while it is being built.
+
+## `go build` is a manager, not a worker
+
+Here is the thing most Go developers never learn, and everything else follows from it.
+
+`go build` does not compile your code. It works out what needs doing, then calls smaller specialist tools to do it: one to compile each package, one to link the results together at the end.
+
+And the Go designers left a documented door open. You are allowed to say: before you run any of those specialists, run my program first, and let mine decide what actually happens.
+
+```bash
+go build -toolexec=/path/to/otelc ./...
+```
+
+That is the entire mechanism. Every time the go command is about to invoke the compiler, it invokes your program instead, handing it the exact command line the compiler was going to receive. Your program can inspect it, change it, and then run the real compiler with whatever arguments it likes.
+
+Two of those arguments matter more than all the others.
+
+The `-p` flag names the package being compiled. That is how the tool knows whether this invocation is one it cares about.
+
+The trailing list of `.go` files is the source the compiler is about to read. Change a path in that list and the compiler reads a different file, and it never knows the difference.
+
+That is the whole trick. Everything after this is consequence.
+
+## Two phases
+
+The tool runs in two distinct phases, and confusing them is the most common way to misread the codebase.
+
+![Two phases: prepare once, then stand in the doorway for every package](/images/blog/otel-two-phase-build.svg)
+
+**Phase one runs once, before any compiling.** It reads the build plan to discover which third-party libraries the project actually uses, checks those against the rules it has available, and then writes a generated file that imports the matching hook packages. After a `go mod tidy`, those hook packages are real dependencies of the project.
+
+That last step is not bureaucratic. It is load bearing, and the reason is worth understanding.
+
+**Phase two is the real build.** The go command compiles packages one at a time, and the tool sits in front of every one of those calls. For almost every package it does nothing at all and passes the command straight through. When a package matches a rule, it parses the source, injects the instrumentation, writes the edited files somewhere else, swaps the paths, and lets the compiler proceed.
+
+## The chain of forced moves
+
+This is the part I find genuinely interesting, and it is the part the reference documentation does not tell as a story. The design of the injected code looks strange until you realise almost none of it was a free choice. Each decision is forced by the one before it.
+
+**Start here: at the moment the tool edits a package, that package's imports are already fixed.**
+
+The go command decided the dependency graph before compilation began. A file called `importcfg` tells the compiler exactly which packages this one is allowed to reference and where to find them. The tool is editing source at a point where adding a new import to that list is no longer straightforward.
+
+*So the injected code cannot simply import the instrumentation package and call it.*
+
+**Which forces the first move: link, do not import.**
+
+Go has a directive, `//go:linkname`, that binds a local symbol to a symbol in another package without importing it. The instrumented package declares a function variable, and that variable is linked to the real hook, which lives in an entirely different module. This works because phase one already made that module a real dependency, so it is present in the final binary and available to the linker.
+
+*But now the call goes through a function pointer, and a function pointer can be nil.*
+
+**Which forces the second move: something has to check.**
+
+You cannot inject a nil check plus a call plus error handling directly into the middle of somebody's function. That is a lot of code to insert at an arbitrary point, and the more you inject, the more ways it can go wrong.
+
+*So the injected code should be as small as possible.*
+
+**Which forces the third move: a trampoline.**
+
+Instead of injecting the whole thing, the tool injects one call to a small generated function, and that function does the real work. The instrumented function gains a single line. Everything complicated lives in the generated helper next door.
+
+*But this helper now runs inside somebody else's request path.*
+
+**Which forces the fourth move: it must never crash the host.**
+
+An observability bug that takes down a production request is worse than no observability at all. So the trampoline recovers from panics. If the hook fails, the failure is contained and the original function carries on as though nothing happened.
+
+*And the injected line ends up in stack traces and debuggers.*
+
+**Which forces the last move: keep it on one line.**
+
+The jump is generated as a single source line, so a stack trace gains at most one comprehensible frame and breakpoints in the original body still land where the source says they should.
+
+Read that chain again and notice that none of it is a preference. Given "you cannot edit at runtime", every step follows. The design is what is left after the constraints have finished.
+
+The trampoline itself is drawn and explained in detail in the existing repository readings, so I will not redraw it here. What I wanted to give you is the reason it exists, because the mechanism makes sense immediately once you have the chain.
+
+## The two halves of the repository
+
+Now the thing that will save you the most time, and which I could not find written down anywhere.
+
+![The two halves of the repository](/images/blog/otel-two-halves.svg)
+
+Half of this codebase runs on a developer's laptop while they build. It reads files, rewrites them, exits. Nothing it depends on ever reaches the finished binary. It can be as heavy as it likes.
+
+The other half is different in kind. It gets compiled into somebody else's application and runs in their production system. Every dependency it pulls in becomes a dependency of theirs. Every millisecond it spends is spent on their request path. Every panic it fails to contain is their outage.
+
+That is why the project has more than one `go.mod`, and it is why the same code review comment can be correct on one side of the line and wrong on the other. Adding a convenient library to the tool is fine. Adding it to the runtime half means every user of this project now depends on it too.
+
+So read every file with that question first. Does this stay in the workshop, or does it drive away?
+
+## The map
+
+| Directory | Half | What lives here |
+|---|---|---|
+| `tool/` | build time | The tool. Doorway logic, source rewriting, the rule engine. |
+| `pkg/` | runtime | Shared pieces that end up in the user's binary. |
+| `instrumentation/` | runtime | One module per supported library. Where most first contributions land. |
+| `test/` | both | Unit, integration and end to end suites, and the apps they build. |
+| `docs/` | | Guides and the architecture decision records. |
+| `schemas/` | | Declarations of what telemetry each instrumentation should emit. |
+
+Inside `tool/`, five paths carry most of the meaning. `tool/cmd/otelc/` is the entry point. `tool/internal/setup/` is phase one. `tool/internal/instrument/` is phase two, where files are actually edited. `tool/internal/rule/` holds the rules that decide what gets instrumented. `tool/internal/ast/` has the helpers for reading and editing Go source as a structure rather than as text.
+
+One warning, because it will confuse you otherwise. This layout changed during 2026. Instrumentation modules moved to the top level and the module path became `go.opentelemetry.io/otelc`. If your checkout has `pkg/inst/`, or no top level `instrumentation/`, it predates that move and you are reading a structure that no longer exists. Pull main first.
+
+## You can just look at it
+
+Here is the thing that turns this from magic into engineering, and it is the single most useful habit for anyone working on the tool.
+
+The rewritten source is not hidden. The tool keeps copies of what it generated, under a `debug` directory inside its working area, and it has flags to control this:
+
+```bash
+otelc --help          # the full list
+otelc --debug ...     # verbose logging
+otelc --work-dir ...  # where working files are written
+```
+
+When something does not behave the way you expect, the question "did my hook actually get injected?" has a direct answer. Go and read the file the compiler was handed. You will see the injected line, the generated trampoline, and the `//go:linkname` directive sitting there in ordinary Go.
+
+Almost every confusing failure resolves in about two minutes once you stop reasoning about what should have happened and go read what did.
+
+## Where to start reading
+
+A codebase makes sense when you follow its story rather than opening files alphabetically.
+
+**Read a rule and a hook together first.** Open any module under `instrumentation/`, find its `otelc.yaml` and its hook file. The rule says where to inject. The hook says what to do. Two small files, and between them they contain the entire idea. Everything in `tool/` exists to connect one to the other.
+
+**Then follow the build.** `tool/cmd/otelc/`, then `tool/internal/setup/`, then `tool/internal/instrument/`. That is the order the program itself runs in.
+
+**Then read a test.** Tests are the most honest documentation in any repository, because they state what the authors believe should be true in a form that fails when it stops being true.
+
+**Then read the decision records** in `docs/adr/`. These are far more useful after the code than before, because you now have somewhere to put them.
+
+Nobody learns a city from an alphabetical index of street names. You walk one route until it is familiar, then another that crosses it, and the map assembles itself.
+
+## What the reference docs cover, and what they do not
+
+This project documents itself unusually well, and you should use that rather than treating this article as a substitute.
+
+`docs/implementation.md` explains the trampoline design. `docs/rules.md` is the complete rule reference and it is long, because the rule system is genuinely capable. `docs/instrument-guide.md` walks through adding an instrumentation. `docs/adr/` records the decisions and the arguments behind them.
+
+What none of them do is tell you which half of the repository you are standing in, why the design was forced rather than chosen, or what to read first. That is what this article is for. When you need the details, the docs have them and they are accurate.
+
+---
+
+**Next:** Part 3, how to write an instrumentation. The mechanics take an afternoon. The decisions are the actual job, and the guide starts after most of them have already been made.

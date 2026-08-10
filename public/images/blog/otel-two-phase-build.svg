@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 400" width="880" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">Two phases: prepare once, then stand in the doorway for every package</title>
+  <desc id="desc">Phase one runs once. It reads the build plan to discover which third-party libraries the project uses, matches those against the available rules, and writes a generated import file so the hook packages become real dependencies. Phase two is the real build. The go command calls the compiler once per package and otelc sits in front of every one of those calls. For most packages it does nothing and passes them straight through. For a package that matches a rule it parses the source, injects the instrumentation, writes edited copies, and hands the compiler those instead.</desc>
+  <style>
+    svg{--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--border:#e7e5e4;--surface:#f5f5f4}
+    @media (prefers-color-scheme: dark){
+      svg{--bg:#0c0a09;--fg:#e7e5e4;--muted:#a8a29e;--border:#292524;--surface:#1c1917}
+    }
+    .bg{fill:var(--bg)}
+    .sans{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+    .band{fill:none;stroke:var(--border);stroke-width:1.5}
+    .box{fill:var(--surface);stroke:var(--border);stroke-width:1.5}
+    .boxHot{fill:var(--fg);stroke:var(--fg);stroke-width:1.5}
+    .boxD{fill:none;stroke:var(--border);stroke-width:1.5;stroke-dasharray:5 4}
+    .ph{fill:var(--muted);font-weight:700;font-size:10px;letter-spacing:.1em}
+    .h{fill:var(--fg);font-weight:700;font-size:13px}
+    .hOn{fill:var(--bg);font-weight:700;font-size:13px}
+    .s{fill:var(--muted);font-size:11.5px}
+    .sOn{fill:var(--bg);font-size:11.5px;opacity:.85}
+    .lbl{fill:var(--muted);font-size:11px}
+    .ln{stroke:var(--muted);stroke-width:1.5;fill:none}
+    .arw{fill:var(--muted)}
+  </style>
+
+  <rect class="bg" x="0" y="0" width="880" height="400" rx="16"/>
+
+  <rect class="band" x="20" y="44" width="840" height="112" rx="12"/>
+  <text class="sans ph" x="36" y="36">PHASE 1 &#183; RUNS ONCE, BEFORE ANY COMPILING</text>
+
+  <rect class="box" x="38" y="66" width="180" height="70" rx="10"/>
+  <text class="sans h" x="128" y="92" text-anchor="middle">Read the plan</text>
+  <text class="sans s" x="128" y="112" text-anchor="middle">which libraries does</text>
+  <text class="sans s" x="128" y="128" text-anchor="middle">this project use?</text>
+
+  <rect class="box" x="256" y="66" width="180" height="70" rx="10"/>
+  <text class="sans h" x="346" y="92" text-anchor="middle">Match rules</text>
+  <text class="sans s" x="346" y="112" text-anchor="middle">do we have</text>
+  <text class="sans s" x="346" y="128" text-anchor="middle">instrumentation for any?</text>
+
+  <rect class="box" x="474" y="66" width="180" height="70" rx="10"/>
+  <text class="sans h" x="564" y="92" text-anchor="middle">Write imports</text>
+  <text class="sans s" x="564" y="112" text-anchor="middle">so the hook packages</text>
+  <text class="sans s" x="564" y="128" text-anchor="middle">become real deps</text>
+
+  <rect class="boxD" x="692" y="66" width="150" height="70" rx="10"/>
+  <text class="sans lbl" x="767" y="96" text-anchor="middle">go mod tidy</text>
+  <text class="sans lbl" x="767" y="114" text-anchor="middle">now they can be</text>
+  <text class="sans lbl" x="767" y="130" text-anchor="middle">linked later</text>
+
+  <path class="ln" d="M218 101 H250"/><path class="arw" d="M250 96 l9 5 l-9 5 z"/>
+  <path class="ln" d="M436 101 H468"/><path class="arw" d="M468 96 l9 5 l-9 5 z"/>
+  <path class="ln" d="M654 101 H686"/><path class="arw" d="M686 96 l9 5 l-9 5 z"/>
+
+  <rect class="band" x="20" y="204" width="840" height="170" rx="12"/>
+  <text class="sans ph" x="36" y="196">PHASE 2 &#183; THE REAL BUILD, ONCE PER PACKAGE</text>
+
+  <rect class="box" x="38" y="240" width="150" height="60" rx="10"/>
+  <text class="sans h" x="113" y="266" text-anchor="middle">go build</text>
+  <text class="sans s" x="113" y="286" text-anchor="middle">calls the compiler</text>
+
+  <rect class="boxHot" x="236" y="226" width="170" height="126" rx="12"/>
+  <text class="sans hOn" x="321" y="254" text-anchor="middle">otelc</text>
+  <text class="sans sOn" x="321" y="276" text-anchor="middle">in the doorway</text>
+  <text class="mono sOn" x="321" y="300" text-anchor="middle">-p &lt;package&gt;</text>
+  <text class="mono sOn" x="321" y="318" text-anchor="middle">file list</text>
+  <text class="sans sOn" x="321" y="338" text-anchor="middle">the two things it reads</text>
+
+  <rect class="boxD" x="454" y="222" width="176" height="52" rx="10"/>
+  <text class="sans lbl" x="542" y="243" text-anchor="middle">no rule matches</text>
+  <text class="sans lbl" x="542" y="261" text-anchor="middle">pass straight through</text>
+
+  <rect class="box" x="454" y="292" width="176" height="66" rx="10"/>
+  <text class="sans h" x="542" y="315" text-anchor="middle">a rule matches</text>
+  <text class="sans s" x="542" y="335" text-anchor="middle">parse, inject, write</text>
+  <text class="sans s" x="542" y="351" text-anchor="middle">edited copies</text>
+
+  <rect class="box" x="678" y="256" width="164" height="66" rx="10"/>
+  <text class="sans h" x="760" y="282" text-anchor="middle">the compiler</text>
+  <text class="sans s" x="760" y="302" text-anchor="middle">compiles what it</text>
+  <text class="sans s" x="760" y="318" text-anchor="middle">is handed</text>
+
+  <path class="ln" d="M188 270 H230"/><path class="arw" d="M230 265 l9 5 l-9 5 z"/>
+  <path class="ln" d="M406 262 H448"/><path class="arw" d="M448 257 l9 5 l-9 5 z"/>
+  <path class="ln" d="M406 320 H448"/><path class="arw" d="M448 315 l9 5 l-9 5 z"/>
+  <path class="ln" d="M630 248 H656 V282 H672"/><path class="arw" d="M672 277 l9 5 l-9 5 z"/>
+  <path class="ln" d="M630 325 H656 V296 H672"/><path class="arw" d="M672 291 l9 5 l-9 5 z"/>
+
+  <text class="sans lbl" x="20" y="392">The compiler never knows. It compiles the files it is given, and it is given different ones.</text>
+</svg>

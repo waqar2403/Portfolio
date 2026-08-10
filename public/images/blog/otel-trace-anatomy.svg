@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 372" width="880" role="img" aria-labelledby="ttl desc">
+  <title id="ttl">One trace: a checkout request across four services, drawn on a timeline</title>
+  <desc id="desc">A checkout request lasting 2350 milliseconds. The root span covers the whole request in the frontend. Three child spans sit inside it: a 100 millisecond call to the cart service, a 130 millisecond call to pricing, and a call to inventory that takes 2070 milliseconds and accounts for nearly all of the elapsed time. The inventory bar is filled solid so the slow step is identifiable by shape alone.</desc>
+  <style>
+    svg{--bg:#fafaf9;--fg:#1c1917;--muted:#78716c;--border:#e7e5e4;--surface:#f5f5f4}
+    @media (prefers-color-scheme: dark){
+      svg{--bg:#0c0a09;--fg:#e7e5e4;--muted:#a8a29e;--border:#292524;--surface:#1c1917}
+    }
+    .bg{fill:var(--bg)}
+    .sans{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .title{fill:var(--fg);font-weight:600;font-size:16px;letter-spacing:-.01em}
+    .sub{fill:var(--muted);font-size:12.5px}
+    .grid{stroke:var(--border);stroke-width:1}
+    .axis{stroke:var(--border);stroke-width:1.5}
+    .tick{fill:var(--muted);font-size:10.5px}
+    .svc{fill:var(--muted);font-size:9.5px;font-weight:700;letter-spacing:.11em}
+    .nm{fill:var(--fg);font-size:12.5px}
+    .bar{fill:var(--surface);stroke:var(--muted);stroke-width:1.5}
+    .barHot{fill:var(--fg);stroke:var(--fg);stroke-width:1.5}
+    .cap{fill:var(--fg)}
+    .dur{fill:var(--muted);font-size:11px}
+    .durHot{fill:var(--bg);font-size:12px;font-weight:700}
+    .kick{fill:var(--fg);font-size:12.5px}
+    .kickB{font-weight:700}
+  </style>
+
+  <rect class="bg" x="0" y="0" width="880" height="372" rx="16"/>
+
+  <text class="sans title" x="32" y="42">One request. One trace. Four spans.</text>
+  <text class="sans sub" x="32" y="63">Every bar is one step: where it started, where it ended.</text>
+
+  <g class="grid">
+    <line x1="268" y1="92" x2="268" y2="300"/>
+    <line x1="413" y1="92" x2="413" y2="300"/>
+    <line x1="558" y1="92" x2="558" y2="300"/>
+    <line x1="703" y1="92" x2="703" y2="300"/>
+    <line x1="848" y1="92" x2="848" y2="300"/>
+  </g>
+  <line class="axis" x1="268" y1="92" x2="848" y2="92"/>
+  <text class="sans tick" x="268" y="84">0</text>
+  <text class="sans tick" x="413" y="84" text-anchor="middle">600</text>
+  <text class="sans tick" x="558" y="84" text-anchor="middle">1200</text>
+  <text class="sans tick" x="703" y="84" text-anchor="middle">1800</text>
+  <text class="sans tick" x="848" y="84" text-anchor="end">2400 ms</text>
+
+  <text class="sans svc" x="32" y="118">FRONTEND</text>
+  <text class="mono nm" x="32" y="137">POST /checkout</text>
+  <rect class="bar" x="268" y="112" width="568" height="28" rx="7"/>
+  <rect class="cap" x="268" y="112" width="3" height="28" rx="1.5"/>
+  <text class="sans dur" x="828" y="131" text-anchor="end">2350 ms</text>
+
+  <text class="sans svc" x="52" y="172">CART</text>
+  <text class="mono nm" x="52" y="191">GET /cart</text>
+  <rect class="bar" x="273" y="166" width="24" height="28" rx="7"/>
+  <rect class="cap" x="273" y="166" width="3" height="28" rx="1.5"/>
+  <text class="sans dur" x="309" y="185">100 ms</text>
+
+  <text class="sans svc" x="52" y="226">PRICING</text>
+  <text class="mono nm" x="52" y="245">GET /price</text>
+  <rect class="bar" x="300" y="220" width="31" height="28" rx="7"/>
+  <rect class="cap" x="300" y="220" width="3" height="28" rx="1.5"/>
+  <text class="sans dur" x="343" y="239">130 ms</text>
+
+  <text class="sans svc" x="52" y="280">INVENTORY</text>
+  <text class="mono nm" x="52" y="299">GET /stock</text>
+  <rect class="barHot" x="333" y="274" width="500" height="28" rx="7"/>
+  <text class="sans durHot" x="583" y="293" text-anchor="middle">2070 ms</text>
+
+  <line class="axis" x1="32" y1="326" x2="848" y2="326"/>
+  <text class="sans kick" x="32" y="350">Nobody had to guess which service was slow. <tspan class="kickB">The shape says it.</tspan></text>
+</svg>
